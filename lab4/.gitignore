@@ -1,0 +1,8 @@
+# Track only the Lab 4 deliverables
+*
+!.gitignore
+!Lab4_*.docx
+!sleep.c
+!args.c
+!args_linux.c
+!Makefile
