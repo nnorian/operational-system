@@ -1,0 +1,92 @@
+{
+  "lang": "en",
+  "font": "tnr",
+  "number": "5-6",
+  "subject": "Operating Systems",
+  "topic": "The File System with Your Own Hands. Inside the xv6 File System",
+  "verifier": { "title": "asist. univ.", "name": "Reițman Patricia" },
+  "year": 2026,
+  "toc": true,
+  "body": [
+    { "type": "chapter", "title": "Introduction", "numbered": false },
+    { "type": "p", "text": "The objective of this combined laboratory work is to explore the file system from two perspectives: first on a real Linux system (Lab 5), observing the directory tree, file types, inodes, hard and symbolic links, permissions, and disk layout; then inside the xv6 teaching operating system (Lab 6), reading the file system code, writing a stat program, measuring kernel limits, and implementing a recursive find utility." },
+    { "type": "p", "text": "**Laboratory work 5 (The File System with Your Own Hands):** explore the Linux file tree, file types, inodes, hard/symbolic links, permissions, and the disk/kernel virtual files in /proc. No programming — commands, observation, and short explanations." },
+    { "type": "p", "text": "**Laboratory work 6 (Inside the xv6 File System):** read the xv6 file system structures (kernel/stat.h, kernel/fs.h), write user/mystat.c to display file metadata, measure the file system limits, and write user/find.c to recursively search directories by name." },
+    { "type": "p", "text": "Both labs were carried out on a personal laptop running Arch Linux (kernel 7.2.9-arch1-1, x86_64, 16 GiB of RAM, 476 GB NVMe SSD). xv6 was run under QEMU (RISC-V 64-bit)." },
+
+    { "type": "chapter", "title": "Theoretical Considerations" },
+    { "type": "p", "text": "A file system organises data on a storage device into a hierarchy of directories and files. Each file is represented internally by an **inode** — a data structure that stores the file's metadata (type, size, permissions, link count, and pointers to data blocks) but not its name. Names are stored in directory entries, which map a human-readable name to an inode number. This separation means a single file can have multiple names (hard links) and that removing a name (`rm`) does not necessarily delete the data — only when the last link is removed and no process holds the file open are the data blocks freed." },
+    { "type": "p", "text": "Linux supports several file types visible through the first character of `ls -l` output: regular files (`-`), directories (`d`), symbolic links (`l`), character devices (`c`), block devices (`b`), pipes (`p`), and sockets (`s`). Permissions are encoded as three groups of rwx bits (owner, group, others) plus special bits (setuid `s`, setgid `s`, sticky `t`). The `umask` subtracts bits from the default permissions when creating new files." },
+    { "type": "p", "text": "The xv6 operating system implements the same ideas in about 1,000 lines of C. Its on-disk layout is: boot block, superblock, log, inode blocks, bitmap, and data blocks. An xv6 inode (`struct dinode` in kernel/fs.h) has fields for type, major/minor device numbers, link count, size, and 13 block addresses (12 direct + 1 indirect). A directory entry (`struct dirent`) is 16 bytes: a 2-byte inode number and a 14-character name (DIRSIZ = 14). The file system supports only three types: `T_DIR` (1), `T_FILE` (2), and `T_DEVICE` (3)." },
+
+    { "type": "chapter", "title": "The File System with Your Own Hands" },
+    { "type": "p", "text": "This chapter corresponds to Laboratory work 5. All exercises were performed as user `nnorian` on Arch Linux." },
+
+    { "type": "heading", "level": 2, "title": "The tree and the file types" },
+    { "type": "p", "text": "The root directory was listed and key paths were examined:" },
+    { "type": "image", "path": "screenshots/fig2-1-tree.png", "caption": "The root of the file tree and file types", "width_pct": 85 },
+    { "type": "p", "text": "**Observations.** (1) Types from the first letter of `ls -l`: `/etc` is `d` (directory), `/etc/passwd` is `-` (regular file), `/bin` is `l` (symbolic link), `/dev/null` is `c` (character device), `/tmp` is `d` (directory, with sticky bit `t`). (2) `/bin` on this system is a symbolic link pointing to `usr/bin`. (3) Character device: `/dev/null` (`c`, major 1, minor 3). Block device: `/dev/nvme0n1` (`b`, major 259, minor 0). (4) `/usr` (18 GB) is much bigger than `/var/log` (3.3 GB), roughly 5× larger." },
+
+    { "type": "heading", "level": 2, "title": "Inodes and links" },
+    { "type": "p", "text": "An inode was examined with `stat`, then hard and symbolic links were tested:" },
+    { "type": "image", "path": "screenshots/fig2-2-inodes.png", "caption": "Inodes, hard links and symbolic links", "width_pct": 85 },
+    { "type": "p", "text": "**Observations.** (1) The inode number is shown in the `Inode` field of `stat` and as the first column of `ls -li`. The link count tells how many names the file has. (2) After creating a hard link, both names share the same inode (1048603) and the link count becomes 2. After removing the original, the hard link is still readable because `rm` only removes one directory entry. The inode and data remain as long as the link count is above zero. (3) The symbolic link has its own inode (1048610) and stores the path to the target. When the target is removed, the path leads nowhere (dangling symlink). The symlink itself still exists — `ls -l` shows it — but following it fails." },
+
+    { "type": "heading", "level": 2, "title": "Permissions" },
+    { "type": "p", "text": "File permissions were tested with `chmod`, and the `umask` was examined:" },
+    { "type": "image", "path": "screenshots/fig2-3-permissions.png", "caption": "File permissions, chmod, umask, setuid, and sticky bit", "width_pct": 85 },
+    { "type": "p", "text": "**Observations.** (1) Common permission modes: `600` = `rw-------` (owner read+write only, e.g. private keys), `644` = `rw-r--r--` (owner read+write, everyone else read, e.g. config files), `755` = `rwxr-xr-x` (owner full, everyone else read+execute, e.g. programs). (2) The `s` in the permission bits is the setuid bit: when set on an executable, it runs with the file owner's effective UID. (3) The `umask` is `0022`, which clears group write and others write bits from the default. For files: `666 - 022 = 644`. For directories: `777 - 022 = 755`. After changing umask to `0077`, new files get mode `600` (`rw-------`). (4) The `t` in `/tmp` is the sticky bit: in a world-writable directory, it prevents users from deleting files they do not own." },
+
+    { "type": "heading", "level": 2, "title": "Disks and the kernel as files" },
+    { "type": "image", "path": "screenshots/fig2-4-disks.png", "caption": "Disk layout, partitions, and /proc virtual files", "width_pct": 85 },
+    { "type": "p", "text": "**Observations.** (1) Disk layout: the physical disk is `nvme0n1` (476.9 GB NVMe SSD). It has two partitions: `nvme0n1p1` (512 MB, mounted at `/boot`) and `nvme0n1p2` (476.4 GB, mounted at `/`). (2) The root file system is 24% full (104 GB used out of 468 GB). (3) The laptop has an Intel i7-13700H CPU and approximately 16 GB of RAM (16140116 kB ≈ 15.4 GiB), according to `/proc`. (4) `/proc/version` shows the kernel version string. `/proc/cpuinfo` exposes per-CPU details. `/proc/meminfo` shows memory statistics. These are virtual files generated by the kernel on each read — they have no data blocks on disk." },
+
+    { "type": "chapter", "title": "Inside the xv6 File System" },
+    { "type": "p", "text": "This chapter corresponds to Laboratory work 6. The xv6 operating system was booted under QEMU (RISC-V 64-bit) and its file system was explored." },
+
+    { "type": "heading", "level": 2, "title": "Read what xv6 shows you" },
+    { "type": "p", "text": "The `ls` output in xv6 shows four columns: name, type, inode number, and size in bytes:" },
+    { "type": "image", "path": "screenshots/fig3-1-xv6ls.png", "caption": "Listing the xv6 root directory", "width_pct": 80 },
+    { "type": "p", "text": "The type codes are defined in `kernel/stat.h`:" },
+    { "type": "code", "caption": "xv6 file type constants (kernel/stat.h)", "text": "#define T_DIR    1   // Directory\n#define T_FILE   2   // File\n#define T_DEVICE 3   // Device" },
+    { "type": "p", "text": "**Observations.** (1) Type 1 = `T_DIR` (directory), type 2 = `T_FILE` (regular file), type 3 = `T_DEVICE` (device). (2) The root directory has inode number 1 (defined as `ROOTINO` in kernel/fs.h). The `.` and `..` entries both show inode 1 because the root directory is its own parent. (3) `console` is a device (type 3) with inode 29 and size 0." },
+
+    { "type": "heading", "level": 2, "title": "Write mystat" },
+    { "type": "p", "text": "The `mystat` program was written in `user/mystat.c`. It uses `stat()` to fill a `struct stat` and prints the type name, inode number, link count, and size for each argument:" },
+    { "type": "code", "caption": "Source code of user/mystat.c", "text": "#include \"kernel/types.h\"\n#include \"kernel/stat.h\"\n#include \"user/user.h\"\n\nchar *\ntypename(int t)\n{\n  if (t == T_DIR)\n    return \"directory\";\n  if (t == T_FILE)\n    return \"file\";\n  if (t == T_DEVICE)\n    return \"device\";\n  return \"?\";\n}\n\nint\nmain(int argc, char *argv[])\n{\n  struct stat st;\n\n  for (int i = 1; i < argc; i++) {\n    if (stat(argv[i], &st) < 0) {\n      fprintf(2, \"mystat: cannot stat %s\\n\", argv[i]);\n      continue;\n    }\n    printf(\"%s: %s, inode %d, links %d, size %d bytes\\n\",\n           argv[i], typename(st.type), st.ino, st.nlink, (int)st.size);\n  }\n  exit(0);\n}" },
+    { "type": "p", "text": "Testing mystat on files of different types:" },
+    { "type": "image", "path": "screenshots/fig3-2-mystat.png", "caption": "Testing mystat on a directory, file, and device", "width_pct": 80 },
+    { "type": "p", "text": "**Observations.** (1) `.` is a directory (inode 1), `README` is a file (inode 2, size 2441 bytes), `console` is a device (inode 29, size 0). (2) In `kernel/sysfile.c`, the line that decrements the link count in `sys_unlink` is `ip->nlink--`. The data blocks are freed later by `iput()` when `nlink` reaches 0 and the reference count also reaches 0. (3) xv6 has no symbolic links and no permissions. The `struct dinode` in kernel/fs.h has fields: `type` (short), `major` (short), `minor` (short), `nlink` (short), `size` (uint), and `addrs[NDIRECT+1]` (13 block addresses — 12 direct + 1 indirect)." },
+
+    { "type": "heading", "level": 2, "title": "Measure the limits" },
+    { "type": "p", "text": "The key file system constants were read from `kernel/fs.h`:" },
+    { "type": "table", "caption": "xv6 file system constants", "header": ["Constant", "Value", "Meaning"], "rows": [
+      ["BSIZE", "1024", "Block size in bytes"],
+      ["NDIRECT", "12", "Direct block pointers per inode"],
+      ["NINDIRECT", "256", "BSIZE / sizeof(uint) = 1024 / 4"],
+      ["DIRSIZ", "14", "Maximum file name length"],
+      ["Max file size", "268 KB", "(12 + 256) × 1024 = 274,432 bytes"]
+    ], "col_weights": [2, 1, 3] },
+    { "type": "p", "text": "**Observations.** (1) File names longer than 14 characters are truncated to 14 characters (DIRSIZ = 14). (2) Maximum file size: NDIRECT (12) + NINDIRECT (256) = 268 blocks × 1024 bytes = 274,432 bytes ≈ 268 KB. (3) From the `nmeta` line: the whole disk has 2000 blocks total. Metadata (nmeta = 47): 1 boot + 1 super + 31 log + 13 inode + 1 bitmap = 47 blocks. Data blocks: 2000 − 47 = 1953." },
+
+    { "type": "heading", "level": 2, "title": "Write find" },
+    { "type": "p", "text": "The `find` program was written in `user/find.c`. It takes a directory and a name as arguments and recursively searches for entries whose last path component matches the given name. The implementation is based on `user/ls.c`: it opens a directory, reads `struct dirent` entries, builds full paths, skips `.` and `..` to avoid infinite recursion, and recurses into subdirectories:" },
+    { "type": "code", "caption": "Source code of user/find.c", "text": "#include \"kernel/types.h\"\n#include \"kernel/stat.h\"\n#include \"user/user.h\"\n#include \"kernel/fs.h\"\n\nvoid\nfind(char *path, char *name)\n{\n  char buf[512], *p;\n  int fd;\n  struct dirent de;\n  struct stat st;\n\n  if ((fd = open(path, 0)) < 0) {\n    fprintf(2, \"find: cannot open %s\\n\", path);\n    return;\n  }\n\n  if (fstat(fd, &st) < 0) {\n    fprintf(2, \"find: cannot stat %s\\n\", path);\n    close(fd); return;\n  }\n\n  switch (st.type) {\n  case T_DEVICE:\n  case T_FILE:\n    p = path + strlen(path);\n    while (p > path && *(p - 1) != '/')\n      p--;\n    if (strcmp(p, name) == 0)\n      printf(\"%s\\n\", path);\n    break;\n\n  case T_DIR:\n    if (strlen(path) + 1 + DIRSIZ + 1 > sizeof buf) {\n      printf(\"find: path too long\\n\");\n      break;\n    }\n    strcpy(buf, path);\n    p = buf + strlen(buf);\n    *p++ = '/';\n    while (read(fd, &de, sizeof(de)) == sizeof(de)) {\n      if (de.inum == 0)\n        continue;\n      memmove(p, de.name, DIRSIZ);\n      p[DIRSIZ] = 0;\n      char *end = p + strlen(p) - 1;\n      while (end >= p && *end == ' ')\n        *end-- = 0;\n\n      if (strcmp(p, \".\") == 0 || strcmp(p, \"..\") == 0)\n        continue;\n\n      if (stat(buf, &st) < 0) {\n        fprintf(2, \"find: cannot stat %s\\n\", buf);\n        continue;\n      }\n\n      if (strcmp(p, name) == 0)\n        printf(\"%s\\n\", buf);\n\n      if (st.type == T_DIR)\n        find(buf, name);\n    }\n    break;\n  }\n  close(fd);\n}\n\nint\nmain(int argc, char *argv[])\n{\n  if (argc < 3) {\n    fprintf(2, \"Usage: find <dir> <name>\\n\");\n    exit(1);\n  }\n  find(argv[1], argv[2]);\n  exit(0);\n}" },
+    { "type": "p", "text": "Testing find:" },
+    { "type": "image", "path": "screenshots/fig3-3-find.png", "caption": "Testing find in xv6", "width_pct": 80 },
+    { "type": "p", "text": "`find . README` finds `./README`. `find . b` returns nothing because no file is named `b` in the tree. The Makefile was updated to include both programs in UPROGS: `$U/_mystat\\` and `$U/_find\\`. The build succeeded without errors." },
+
+    { "type": "chapter", "title": "Conclusions", "numbered": false },
+    { "type": "p", "text": "This combined laboratory work explored the file system at two levels. In Laboratory work 5, the Linux file system was examined directly: the directory tree, the seven file types visible through `ls -l`, the separation of inode metadata from directory-entry names (making hard links possible), the semantics of symbolic links (which can dangle), the rwx permission model with its special bits (setuid, sticky), and the virtual files in `/proc` that expose kernel state. Key insights included: `rm` removes a name, not the data; a file's disk usage can differ dramatically from its apparent size (sparse files); and directory permissions control listing (`r`) and traversal (`x`) independently." },
+    { "type": "p", "text": "In Laboratory work 6, the same concepts were seen inside xv6's source code. The on-disk inode (`struct dinode`) stores type, device numbers, link count, size, and 13 block pointers (12 direct + 1 indirect), limiting files to 268 KB. Directory entries are 16 bytes (2-byte inum + 14-byte name), which truncates long names. The `mystat` program demonstrated `stat()` and confirmed that hard links share an inode. The `find` program exercised recursive directory traversal, careful file-descriptor management (`close` after each directory), and the need to skip `.` and `..` to avoid infinite loops. Both programs compiled and ran correctly in xv6 under QEMU." },
+
+    { "type": "chapter", "title": "Bibliography", "numbered": false },
+    { "type": "numbered", "items": [
+      "Operating Systems, FCIM / FAF, UTM. Laboratory guide 5 \"The File System with Your Own Hands\" and Laboratory guide 6 \"Inside the xv6 File System\", 2026–2027.",
+      "Love R. Linux Kernel Development (3rd ed.), Addison-Wesley, 2010. Chapters on the Virtual Filesystem and ext4.",
+      "Cox R., Kaashoek F., Morris R. xv6: a simple, Unix-like teaching operating system (RISC-V version). MIT PDOS, https://pdos.csail.mit.edu/6.1810/.",
+      "MIT PDOS. xv6-riscv source repository, https://github.com/mit-pdos/xv6-riscv.",
+      "The Linux man-pages project. stat(1), ln(1), chmod(1), ls(1), mount(8), lsblk(8), https://man7.org/linux/man-pages/."
+    ] }
+  ]
+}
